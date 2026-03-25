@@ -47,7 +47,7 @@ prompt = ChatPromptTemplate.from_template(template)
 
 # 5. THE CHAIN
 def format_docs(docs):
-    return "\n\n".join(doc.page_content for doc in docs)
+      return "\n\n".join(doc.page_content.strip() for doc in docs)
 
 # LangChain Expression Language
 rag_chain = (
@@ -60,9 +60,12 @@ rag_chain = (
 # 6. EXECUTION
 if __name__ == "__main__":
     # Test with the "Honey" query to see the guardrail in action
-    user_issue = "How to make honey from ice?"
+    user_issue = "According to the 2021 LHC ruling, what is the limitation period for claiming past maintenance? Can a woman claim it for more than 3 years?"
     
     print("\n--- Awaz-e-Nisa: Analyzing Case... ---")
     
     response = rag_chain.invoke(user_issue)
     print("\n" + response)
+
+
+    
