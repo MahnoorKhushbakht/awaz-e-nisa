@@ -1,0 +1,6 @@
+.env
+__pycache__/
+.streamlit/
+db/ 
+# Note: Usually, we don't upload the 'db' folder because it's large. 
+# Teammates should run 'ingest_data.py' to build it locally.
