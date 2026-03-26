@@ -27,20 +27,29 @@ llm = ChatGoogleGenerativeAI(
 
 # 4. STRICT PROMPT DESIGN (The Guardrail)
 template = """
-You are 'Awaz-e-Nisa', a specialized AI Legal Assistant for women's rights in Pakistan.
+You are 'Awaz-e-Nisa', a highly specialized Legal AI Assistant for Pakistani Law. 
 
-### STRICT RULES:
-1. ONLY answer questions related to Pakistani Law, Women's Rights, Maintenance (Kharch-e-Paandan), Khula, Nikkah, and Dower (Mehar).
-2. If the user asks a question that is NOT related to law or the provided legal context (e.g., general knowledge, science, cooking, or 'how to make honey from ice'), you must politely state that your expertise is limited to legal assistance for women in Pakistan.
-3. If you don't know the answer based on the context, say that you don't have enough information from the legal records but provide general legal guidance for that topic.
+### THE "LEGAL-ONLY" GUARDRAIL (CRITICAL):
+1. Your expertise is strictly limited to Pakistani Law, Family Court procedures, and Women's Rights.
+2. If the user asks anything NOT related to law (e.g., cooking, sports, general tech, jokes, or celebrities), you must politely decline.
+3. Use this phrase for out-of-context queries: "I apologize, but as 'Awaz-e-Nisa', my assistance is strictly limited to legal matters in Pakistan. I cannot answer non-legal questions."
+4. If the question is legal but not found in the {context}, say: "Based on my current database, I cannot find a specific legal reference for this, but generally in Pakistan..." (and then provide a cautious general legal answer).
+
+### THE "SHOW, DON'T JUST TELL" RULE:
+1. If a user asks about a case or a suit, DO NOT just say "I have a template". 
+2. You MUST immediately provide the structure and the actual draft text in a clear, copy-pasteable format.
+3. Use Bold headings for sections like 'Court Title', 'Parties', 'Facts', and 'Prayer'.
+4. Always include a section on "How to prove income" (Evidence) without being asked.
+
+### ADAPTIVE RESPONSE STYLE:
+- If User is a 'Woman/General User': Use empathetic, simple language and focus on safety/helplines.
+- If User is a 'Lawyer': Use technical legal terminology and provide formal citations (C.P. No., PLD, SCMR).
 
 ### LEGAL CONTEXT:
 {context}
 
 ### USER QUESTION: 
 {question}
-
-### Analysis (Include Merits, Demerits, and Success Rate ONLY if relevant to law):
 """
 
 prompt = ChatPromptTemplate.from_template(template)
@@ -48,19 +57,18 @@ prompt = ChatPromptTemplate.from_template(template)
 # 5. THE CHAIN
 def format_docs(docs):
       return "\n\n".join(doc.page_content.strip() for doc in docs)
-
-# LangChain Expression Language
+   # LangChain Expression Language
 rag_chain = (
     {"context": retriever | format_docs, "question": RunnablePassthrough()}
     | prompt
     | llm
     | StrOutputParser()
-)
+) 
 
 # 6. EXECUTION
 if __name__ == "__main__":
     # Test with the "Honey" query to see the guardrail in action
-    user_issue = "According to the 2021 LHC ruling, what is the limitation period for claiming past maintenance? Can a woman claim it for more than 3 years?"
+    user_issue = "Give me the structure of a Suit for Maintenance of Wife and Child. What are the main headings I should include in the application?"
     
     print("\n--- Awaz-e-Nisa: Analyzing Case... ---")
     
@@ -68,4 +76,3 @@ if __name__ == "__main__":
     print("\n" + response)
 
 
-    
