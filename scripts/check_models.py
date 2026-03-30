@@ -2,7 +2,7 @@ import google.generativeai as genai
 import os
 
 # Apni API Key yahan enter karein
-os.environ["GOOGLE_API_KEY"] = "AIzaSyDw9zLQNFHdyFeAHkuLvKQoBlHN6ivXChU"
+os.environ["GOOGLE_API_KEY"] = ""
 genai.configure(api_key=os.environ["GOOGLE_API_KEY"])
 
 print("--- Checking Available Models ---")
