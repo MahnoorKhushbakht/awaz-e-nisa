@@ -61,7 +61,7 @@ prompt = ChatPromptTemplate.from_template(template)
 # 5. THE CHAIN
 def format_docs(docs):
       return "\n\n".join(doc.page_content.strip() for doc in docs)
-
+   # LangChain Expression Language
 rag_chain = (
     {"context": retriever | format_docs, "question": RunnablePassthrough()}
     | prompt
