@@ -8,7 +8,7 @@ import cv2
 import numpy as np
 import tempfile
 import whisper
-from fpdf import FPDF # PDF generation ke liye
+from fpdf import FPDF
 from database import init_db, add_user, verify_user, save_chat_message, get_chat_history
 from streamlit_mic_recorder import mic_recorder
 
@@ -28,7 +28,6 @@ def configure_paths():
                     if os.path.exists(bin_path):
                         found_path = bin_path
                         break
-
         possible_ffmpeg_paths = [found_path, r'C:\ffmpeg\bin', r'C:\Program Files\ffmpeg\bin', os.path.join(os.environ.get('USERPROFILE', ''), r'scoop\shims')]
         for path in possible_ffmpeg_paths:
             if path and os.path.exists(path):
@@ -51,17 +50,18 @@ if "logged_in" not in st.session_state: st.session_state.logged_in = False
 if "messages" not in st.session_state: st.session_state.messages = []
 if "current_mode" not in st.session_state: st.session_state.current_mode = "GENERAL USER (Woman)"
 if "last_audio_id" not in st.session_state: st.session_state.last_audio_id = None
+# NEW: Track expanded analysis panels per message index
+if "expanded_panels" not in st.session_state: st.session_state.expanded_panels = {}
 
 # --- 3. HELPER FUNCTIONS ---
-def create_pdf(text):
-    """Legal draft ko PDF mein convert karne ka function"""
+
+def create_pdf(text, filename="Legal_Document"):
+    """Convert any text/draft to a downloadable PDF."""
     pdf = FPDF()
     pdf.add_page()
     pdf.set_font("Arial", size=12)
-    # PDF handles latin-1 better, ignore special symbols that crash it
     clean_text = text.encode('latin-1', 'ignore').decode('latin-1')
     pdf.multi_cell(0, 10, txt=clean_text, align='L')
-    
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
         pdf.output(tmp.name)
         return tmp.name
@@ -93,16 +93,186 @@ def extract_text_from_image(uploaded_file):
         return text if text.strip() else "⚠️ OCR failed to extract meaningful text."
     except Exception as e: return f"Error reading document: {e}"
 
+
+# ─────────────────────────────────────────────
+# NEW HELPER: Run Analysis Chains
+# ─────────────────────────────────────────────
+def run_merits_analysis(query):
+    return st.session_state.merits_chain.invoke(query)
+
+def run_opposition_analysis(query):
+    return st.session_state.opposition_chain.invoke(query)
+
+def run_timeline_analysis(query):
+    return st.session_state.timeline_chain.invoke(query)
+
+def run_draft_generation(query):
+    return st.session_state.draft_chain.invoke(query)
+
+
+# ─────────────────────────────────────────────
+# NEW UI COMPONENT: Analysis Panel (shown below each AI message)
+# ─────────────────────────────────────────────
+def render_analysis_panel(msg_index, original_query, mode):
+    """
+    Renders the 4 feature buttons below an AI response.
+    Each button is a toggle — click once to generate & show, click again to hide.
+    """
+    panel_key = f"panel_{msg_index}"
+    if panel_key not in st.session_state.expanded_panels:
+        st.session_state.expanded_panels[panel_key] = {
+            "merits": False,
+            "opposition": False,
+            "timeline": False,
+            "draft": False,
+            "merits_result": None,
+            "opposition_result": None,
+            "timeline_result": None,
+            "draft_result": None,
+        }
+    
+    panel = st.session_state.expanded_panels[panel_key]
+
+    st.markdown("---")
+    st.markdown("<p style='color:#888; font-size:12px; margin-bottom:8px;'>🔍 DEEP ANALYSIS TOOLS</p>", unsafe_allow_html=True)
+
+    col1, col2, col3, col4 = st.columns(4)
+
+    # --- Button 1: Merits & Demerits ---
+    with col1:
+        btn_label_m = "✅ Hide Merits" if panel["merits"] else "✅ Case Merits / Demerits"
+        if st.button(btn_label_m, key=f"btn_merits_{msg_index}", use_container_width=True):
+            if not panel["merits"]:
+                if not panel["merits_result"]:
+                    with st.spinner("Analyzing case strength..."):
+                        panel["merits_result"] = run_merits_analysis(original_query)
+                panel["merits"] = True
+            else:
+                panel["merits"] = False
+            st.session_state.expanded_panels[panel_key] = panel
+            st.rerun()
+
+    # --- Button 2: Opposition Arguments ---
+    with col2:
+        btn_label_o = "🔴 Hide Opposition" if panel["opposition"] else "🔴 Opposition Arguments"
+        if st.button(btn_label_o, key=f"btn_opp_{msg_index}", use_container_width=True):
+            if not panel["opposition"]:
+                if not panel["opposition_result"]:
+                    with st.spinner("Generating counter-arguments..."):
+                        panel["opposition_result"] = run_opposition_analysis(original_query)
+                panel["opposition"] = True
+            else:
+                panel["opposition"] = False
+            st.session_state.expanded_panels[panel_key] = panel
+            st.rerun()
+
+    # --- Button 3: Timeline Estimator ---
+    with col3:
+        btn_label_t = "📅 Hide Timeline" if panel["timeline"] else "📅 Timeline Estimator"
+        if st.button(btn_label_t, key=f"btn_time_{msg_index}", use_container_width=True):
+            if not panel["timeline"]:
+                if not panel["timeline_result"]:
+                    with st.spinner("Estimating court timeline..."):
+                        panel["timeline_result"] = run_timeline_analysis(original_query)
+                panel["timeline"] = True
+            else:
+                panel["timeline"] = False
+            st.session_state.expanded_panels[panel_key] = panel
+            st.rerun()
+
+    # --- Button 4: Legal Draft ---
+    with col4:
+        btn_label_d = "📄 Hide Draft" if panel["draft"] else "📄 Generate Legal Draft"
+        if st.button(btn_label_d, key=f"btn_draft_{msg_index}", use_container_width=True):
+            if not panel["draft"]:
+                if not panel["draft_result"]:
+                    with st.spinner("Drafting legal document..."):
+                        panel["draft_result"] = run_draft_generation(original_query)
+                panel["draft"] = True
+            else:
+                panel["draft"] = False
+            st.session_state.expanded_panels[panel_key] = panel
+            st.rerun()
+
+    # --- RESULTS DISPLAY ---
+
+    if panel["merits"] and panel["merits_result"]:
+        with st.container():
+            st.markdown("""
+                <div style='background:#0d1a0d; border:1px solid #2d5a2d; border-radius:8px; padding:16px; margin-top:10px;'>
+                <p style='color:#4CAF50; font-size:13px; font-weight:bold; margin:0 0 8px 0;'>⚖️ CASE STRENGTH ANALYSIS</p>
+            """, unsafe_allow_html=True)
+            st.markdown(panel["merits_result"])
+            st.markdown("</div>", unsafe_allow_html=True)
+
+    if panel["opposition"] and panel["opposition_result"]:
+        with st.container():
+            st.markdown("""
+                <div style='background:#1a0d0d; border:1px solid #5a2d2d; border-radius:8px; padding:16px; margin-top:10px;'>
+                <p style='color:#FF5252; font-size:13px; font-weight:bold; margin:0 0 8px 0;'>🔴 OPPOSITION COUNTER-ARGUMENTS</p>
+            """, unsafe_allow_html=True)
+            st.markdown(panel["opposition_result"])
+            st.markdown("</div>", unsafe_allow_html=True)
+
+    if panel["timeline"] and panel["timeline_result"]:
+        with st.container():
+            st.markdown("""
+                <div style='background:#0d0d1a; border:1px solid #2d2d5a; border-radius:8px; padding:16px; margin-top:10px;'>
+                <p style='color:#7C9EFF; font-size:13px; font-weight:bold; margin:0 0 8px 0;'>📅 SMART TIMELINE ESTIMATE</p>
+            """, unsafe_allow_html=True)
+            st.markdown(panel["timeline_result"])
+            st.markdown("</div>", unsafe_allow_html=True)
+
+    if panel["draft"] and panel["draft_result"]:
+        with st.container():
+            st.markdown("""
+                <div style='background:#0d0f1a; border:1px solid #3a3a6e; border-radius:8px; padding:16px; margin-top:10px;'>
+                <p style='color:#FFD700; font-size:13px; font-weight:bold; margin:0 0 8px 0;'>📄 LEGAL DRAFT</p>
+            """, unsafe_allow_html=True)
+            st.markdown(panel["draft_result"])
+            
+            # ─── DOWNLOAD BUTTON ───
+            pdf_path = create_pdf(panel["draft_result"])
+            with open(pdf_path, "rb") as f:
+                st.download_button(
+                    label="⬇️ Download as PDF",
+                    data=f,
+                    file_name=f"Legal_Draft_{msg_index}.pdf",
+                    mime="application/pdf",
+                    key=f"dl_draft_{msg_index}",
+                    use_container_width=True
+                )
+            st.markdown("</div>", unsafe_allow_html=True)
+
+
 # --- 4. CUSTOM CSS ---
 st.markdown("""
     <style>
+    @import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;600;700&family=Inter:wght@300;400;500&display=swap');
+    
     .stApp { background-color: #000000; }
     section[data-testid="stSidebar"] { background-color: #050505 !important; border-right: 1px solid #FF2E7E !important; }
-    h1, h2, h3, .stSubheader { color: #FF2E7E !important; font-family: 'Inter', sans-serif; }
+    h1, h2, h3, .stSubheader { color: #FF2E7E !important; font-family: 'Rajdhani', sans-serif !important; }
     .stMarkdown, p, span { color: #E0E0E0 !important; }
     .court-box { background-color: #0A0A0A; border-left: 5px solid #FF2E7E; padding: 15px; margin-bottom: 15px; border-radius: 5px; }
     .mode-tag { font-size: 10px; font-weight: bold; color: #FF2E7E; text-transform: uppercase; margin-bottom: 5px; }
     .stChatInput input { background-color: #000 !important; color: #fff !important; border: 1px solid #333 !important; }
+    
+    /* Analysis buttons styling */
+    div[data-testid="stHorizontalBlock"] .stButton button {
+        background-color: #0a0a0a !important;
+        border: 1px solid #333 !important;
+        color: #ccc !important;
+        font-size: 12px !important;
+        border-radius: 6px !important;
+        transition: all 0.2s ease !important;
+    }
+    div[data-testid="stHorizontalBlock"] .stButton button:hover {
+        border-color: #FF2E7E !important;
+        color: #FF2E7E !important;
+        background-color: #1a0010 !important;
+    }
+    
     footer {visibility: hidden;}
     </style>
     """, unsafe_allow_html=True)
@@ -131,15 +301,20 @@ if not st.session_state.logged_in:
                         st.rerun()
         with tab2:
             with st.form("s"):
-                nu, np = st.text_input("New Username"), st.text_input("New Password", type="password")
+                nu, np_ = st.text_input("New Username"), st.text_input("New Password", type="password")
                 if st.form_submit_button("Register"):
-                    if add_user(nu, np): st.success("Account Created!")
+                    if add_user(nu, np_): st.success("Account Created!")
 
 # --- 6. MAIN APP ---
 else:
+    # Load all chains once
     if "rag" not in st.session_state:
-        from legal_advisor import rag_chain
+        from legal_advisor import rag_chain, merits_chain, opposition_chain, timeline_chain, draft_chain
         st.session_state.rag = rag_chain
+        st.session_state.merits_chain = merits_chain
+        st.session_state.opposition_chain = opposition_chain
+        st.session_state.timeline_chain = timeline_chain
+        st.session_state.draft_chain = draft_chain
 
     def get_adaptive_response(user_input):
         helpline_instruction = ""
@@ -147,7 +322,6 @@ else:
             helpline_instruction = "End with relevant Pakistani women legal helplines (1043, 15, etc.)."
         else:
             helpline_instruction = "Do NOT provide any helplines. Use technical legal terminology and citations (PLD/SCMR)."
-
         final_prompt = (
             f"Query: {user_input}\n"
             f"Rules:\n"
@@ -183,20 +357,17 @@ else:
                     with st.spinner(f"Reading PDF: {doc.name}"): combined_text += f"\n--- {doc.name} ---\n" + extract_text_from_pdf(doc)
                 else:
                     with st.spinner(f"Reading Image: {doc.name}"): combined_text += f"\n--- {doc.name} ---\n" + extract_text_from_image(doc)
-            
             st.text_area("Extracted Content Preview:", combined_text, height=150)
-            
             if st.button("Send to AI for Analysis"):
                 if combined_text.strip():
                     analysis_prompt = f"Analyze these documents and respond in the same language as detected: \n\n {combined_text}"
-                    st.session_state.messages.append({"role": "user", "content": f"Uploaded {len(uploaded_docs)} document(s).", "mode": st.session_state.current_mode})
-                    
+                    st.session_state.messages.append({"role": "user", "content": f"Uploaded {len(uploaded_docs)} document(s).", "mode": st.session_state.current_mode, "query": analysis_prompt})
                     with st.chat_message("assistant", avatar="⚖️"):
                         with st.status("Analyzing Legal Text...", expanded=False) as status:
                             response = st.session_state.rag.invoke(analysis_prompt)
                             status.update(label="Analysis Complete", state="complete")
                         st.markdown(response)
-                        st.session_state.messages.append({"role": "assistant", "content": response, "mode": st.session_state.current_mode})
+                        st.session_state.messages.append({"role": "assistant", "content": response, "mode": st.session_state.current_mode, "query": analysis_prompt})
                         save_chat_message(st.session_state.username, "assistant", response, st.session_state.current_mode)
                     st.rerun()
 
@@ -205,62 +376,66 @@ else:
             st.session_state.logged_in = False
             st.rerun()
 
-    # Chat Display
+    # ─── CHAT DISPLAY ───
     st.header(f"⚖️ {st.session_state.current_mode}")
+    
+    # Track the last user query to associate with AI response
+    last_user_query = ""
+    
     for i, msg in enumerate(st.session_state.messages):
         with st.chat_message(msg["role"], avatar="⚖️" if msg["role"] == "assistant" else "👩‍💼"):
             st.markdown(f"<div class='mode-tag'>[{msg.get('mode', 'GENERAL')}]</div>", unsafe_allow_html=True)
             st.markdown(msg["content"])
-            
-            # Agar AI ne draft banaya hai toh Download button dikhayen
-            if msg["role"] == "assistant" and "DRAFT" in msg["content"].upper():
-                pdf_path = create_pdf(msg["content"])
-                with open(pdf_path, "rb") as f:
-                    st.download_button(
-                        label="📄 Download Legal Draft (PDF)",
-                        data=f,
-                        file_name=f"Legal_Draft_{i}.pdf",
-                        mime="application/pdf",
-                        key=f"btn_{i}"
-                    )
 
-    # 1. Text Input logic
+            # Track user queries for pairing with assistant responses
+            if msg["role"] == "user":
+                last_user_query = msg.get("query", msg["content"])
+
+            # ─── ANALYSIS PANEL: show below every AI response ───
+            if msg["role"] == "assistant":
+                # Find the preceding user query
+                original_query = ""
+                for j in range(i - 1, -1, -1):
+                    if st.session_state.messages[j]["role"] == "user":
+                        original_query = st.session_state.messages[j].get("query", st.session_state.messages[j]["content"])
+                        break
+                
+                if original_query:
+                    render_analysis_panel(i, original_query, msg.get("mode", "GENERAL"))
+
+    # ─── TEXT INPUT ───
     if prompt := st.chat_input("Enter Legal Query..."):
-        st.session_state.messages.append({"role": "user", "content": prompt, "mode": st.session_state.current_mode})
+        st.session_state.messages.append({"role": "user", "content": prompt, "mode": st.session_state.current_mode, "query": prompt})
         save_chat_message(st.session_state.username, "user", prompt, st.session_state.current_mode)
-        
         with st.chat_message("assistant", avatar="⚖️"):
             with st.status("Consulting Precedents...", expanded=False) as status:
                 response = get_adaptive_response(prompt)
                 status.update(label="Consultation Finished", state="complete")
             st.markdown(response)
-            st.session_state.messages.append({"role": "assistant", "content": response, "mode": st.session_state.current_mode})
+            st.session_state.messages.append({"role": "assistant", "content": response, "mode": st.session_state.current_mode, "query": prompt})
             save_chat_message(st.session_state.username, "assistant", response, st.session_state.current_mode)
         st.rerun()
 
-    # 2. Audio Input logic
+    # ─── AUDIO INPUT ───
     if audio_data and audio_data.get('id') != st.session_state.last_audio_id:
         whisper_model = load_whisper_model()
         with st.status("🎧 Processing Audio...", expanded=True) as status:
             with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp_file:
                 tmp_file.write(audio_data['bytes'])
                 tmp_path = tmp_file.name
-            
             result = whisper_model.transcribe(tmp_path)
             transcribed_text = result["text"].strip()
             os.remove(tmp_path)
             st.session_state.last_audio_id = audio_data['id']
             status.update(label="✅ Audio Transcribed", state="complete")
-
         if transcribed_text:
-            st.session_state.messages.append({"role": "user", "content": f"🎤 {transcribed_text}", "mode": st.session_state.current_mode})
+            st.session_state.messages.append({"role": "user", "content": f"🎤 {transcribed_text}", "mode": st.session_state.current_mode, "query": transcribed_text})
             save_chat_message(st.session_state.username, "user", f"🎤 {transcribed_text}", st.session_state.current_mode)
-            
             with st.chat_message("assistant", avatar="⚖️"):
                 with st.status("Analyzing Voice Query...", expanded=False) as status:
                     response = get_adaptive_response(transcribed_text)
                     status.update(label="Response Ready", state="complete")
                 st.markdown(response)
-                st.session_state.messages.append({"role": "assistant", "content": response, "mode": st.session_state.current_mode})
+                st.session_state.messages.append({"role": "assistant", "content": response, "mode": st.session_state.current_mode, "query": transcribed_text})
                 save_chat_message(st.session_state.username, "assistant", response, st.session_state.current_mode)
             st.rerun()
